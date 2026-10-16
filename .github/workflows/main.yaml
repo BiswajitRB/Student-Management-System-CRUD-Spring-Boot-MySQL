@@ -12,43 +12,22 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Copy files to EC2 via SSH
+    - name: Copy essential files to EC2 via SSH
       uses: appleboy/scp-action@master
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
-        source: "."
+        source: "Dockerfile,docker-compose.yaml,src/,pom.xml"
         target: "/home/${{ secrets.EC2_USER }}/student-app"
 
-    - name: Auto Install Docker & Deploy via Docker Compose on EC2
+    - name: Deploy via Docker Compose on EC2
       uses: appleboy/ssh-action@master
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          # 1. Check and install Docker if not present
-          if ! command -v docker &> /dev/null
-          then
-              echo "Docker not found. Installing Docker..."
-              sudo apt update -y
-              sudo apt install docker.io docker-compose-v2 -y
-              sudo systemctl start docker
-              sudo systemctl enable docker
-              sudo usermod -aG docker $USER
-          else
-              echo "Docker is already installed."
-          fi
-
-          # 2. Navigate to project directory and deploy
           cd /home/${{ secrets.EC2_USER }}/student-app
           sudo docker compose down -v
           sudo docker compose up --build -d
-
-          # 3. Check live status and app logs for debugging
-          echo "------ CONTAINER STATUS ------"
-          sudo docker ps
-
-          echo "------ APP LOGS ------"
-          sudo docker logs student-app --tail 50
