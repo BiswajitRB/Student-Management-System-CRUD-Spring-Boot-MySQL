@@ -45,3 +45,10 @@ jobs:
           cd /home/${{ secrets.EC2_USER }}/student-app
           sudo docker compose down -v
           sudo docker compose up --build -d
+
+          # 3. Check live status and app logs for debugging
+          echo "------ CONTAINER STATUS ------"
+          sudo docker ps
+
+          echo "------ APP LOGS ------"
+          sudo docker logs student-app --tail 50
