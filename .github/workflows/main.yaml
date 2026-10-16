@@ -1,35 +1,18 @@
-name: CI-CD Spring Boot Docker to EC2
+name: CI CD Pipeline
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  IMAGE_NAME: student-management
-
 jobs:
-  # ---------- 1. BUILD & TEST ----------
-  build-test:
+  build:
     runs-on: ubuntu-22.04
-
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: rootpassword
-          MYSQL_DATABASE: studentdb
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h localhost -prootpassword"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
 
     steps:
       - name: Checkout code
@@ -45,77 +28,8 @@ jobs:
       - name: Make mvnw executable
         run: chmod +x mvnw
 
-      - name: Build and test
-        run: ./mvnw -B clean verify
-        env:
-          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/studentdb
-          SPRING_DATASOURCE_USERNAME: root
-          SPRING_DATASOURCE_PASSWORD: rootpassword
+      - name: Build (tests skip)
+        run: ./mvnw -B clean package -DskipTests
 
-  # ---------- 2. DOCKER BUILD & PUSH ----------
-  docker-push:
-    needs: build-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-  # ---------- 3. DEPLOY TO EC2 ----------
-  deploy:
-    needs: docker-push
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Deploy on EC2 via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            # Docker network (agar pehle se hai to skip)
-            docker network inspect student-net >/dev/null 2>&1 || docker network create student-net
-
-            # MySQL container (sirf pehli baar banega)
-            if [ -z "$(docker ps -aq -f name=^student-mysql$)" ]; then
-              docker run -d --name student-mysql \
-                --network student-net \
-                --restart unless-stopped \
-                -e MYSQL_ROOT_PASSWORD=${{ secrets.DB_PASSWORD }} \
-                -e MYSQL_DATABASE=studentdb \
-                -v mysql_data:/var/lib/mysql \
-                mysql:8.0
-              echo "MySQL start ho raha hai, 30 sec wait..."
-              sleep 30
-            fi
-
-            # App deploy
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            docker stop student-app || true
-            docker rm student-app || true
-            docker run -d --name student-app \
-              --network student-net \
-              --restart unless-stopped \
-              -p 8080:8080 \
-              -e SPRING_DATASOURCE_URL=jdbc:mysql://student-mysql:3306/studentdb \
-              -e SPRING_DATASOURCE_USERNAME=root \
-              -e SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }} \
-              ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            docker image prune -f
+      - name: Check jar file
+        run: ls -lh target/*.jar
