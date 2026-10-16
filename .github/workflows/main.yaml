@@ -32,7 +32,8 @@ jobs:
           --health-retries=5
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -40,6 +41,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
+
+      - name: Make mvnw executable
+        run: chmod +x mvnw
 
       - name: Build and test
         run: ./mvnw -B clean verify
@@ -55,7 +59,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -85,14 +90,32 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            # Docker network (agar pehle se hai to skip)
+            docker network inspect student-net >/dev/null 2>&1 || docker network create student-net
+
+            # MySQL container (sirf pehli baar banega)
+            if [ -z "$(docker ps -aq -f name=^student-mysql$)" ]; then
+              docker run -d --name student-mysql \
+                --network student-net \
+                --restart unless-stopped \
+                -e MYSQL_ROOT_PASSWORD=${{ secrets.DB_PASSWORD }} \
+                -e MYSQL_DATABASE=studentdb \
+                -v mysql_data:/var/lib/mysql \
+                mysql:8.0
+              echo "MySQL start ho raha hai, 30 sec wait..."
+              sleep 30
+            fi
+
+            # App deploy
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             docker stop student-app || true
             docker rm student-app || true
             docker run -d --name student-app \
+              --network student-net \
               --restart unless-stopped \
               -p 8080:8080 \
-              -e SPRING_DATASOURCE_URL=jdbc:mysql://${{ secrets.DB_HOST }}:3306/studentdb \
-              -e SPRING_DATASOURCE_USERNAME=${{ secrets.DB_USER }} \
+              -e SPRING_DATASOURCE_URL=jdbc:mysql://student-mysql:3306/studentdb \
+              -e SPRING_DATASOURCE_USERNAME=root \
               -e SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }} \
               ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             docker image prune -f
