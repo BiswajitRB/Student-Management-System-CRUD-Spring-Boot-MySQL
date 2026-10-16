@@ -1,59 +1,140 @@
-name: CI CD Pipeline
+
+name: CI-CD Spring Boot Docker
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-22.04
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: studentdb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -prootpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '17'
-          distribution: 'temurin'
           cache: maven
 
-      - name: Make mvnw executable
-        run: chmod +x mvnw
+      - name: Build and test
+        run: mvn -B clean verify
+        env:
+          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/studentdb
+          SPRING_DATASOURCE_USERNAME: root
+          SPRING_DATASOURCE_PASSWORD: rootpassword
 
-      - name: Build (tests skip)
-        run: ./mvnw -B clean package -DskipTests
+      - name: Set Docker image name
+        id: image
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> "$GITHUB_OUTPUT"
 
-      - name: Check jar file
-        run: ls -lh target/*.jar
-
-          docker-push:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
+      - name: Login to GHCR
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        if: github.event_name == 'push'
+        run: |
+          docker build -t "${{ steps.image.outputs.name }}" .
+          docker push "${{ steps.image.outputs.name }}"
+
+      - name: Deploy to EC2
+        if: github.event_name == 'push'
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
         with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/student-management:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/student-management:${{ github.sha }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: IMAGE_NAME,GHCR_USERNAME,GHCR_TOKEN,DB_PASSWORD,MYSQL_ROOT_PASSWORD
+          script: |
+            set -e
+
+            docker network inspect student-net >/dev/null 2>&1 || \
+              docker network create student-net
+
+            if ! docker container inspect student-mysql >/dev/null 2>&1; then
+              docker volume create student-mysql-data
+
+              docker run -d \
+                --name student-mysql \
+                --restart unless-stopped \
+                --network student-net \
+                --health-cmd='mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" || exit 1' \
+                --health-interval=10s \
+                --health-timeout=5s \
+                --health-retries=15 \
+                -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+                -e MYSQL_DATABASE=studentdb \
+                -e MYSQL_USER=studentuser \
+                -e MYSQL_PASSWORD="$DB_PASSWORD" \
+                -v student-mysql-data:/var/lib/mysql \
+                mysql:8.0
+            else
+              docker start student-mysql 2>/dev/null || true
+              docker network connect student-net student-mysql 2>/dev/null || true
+            fi
+
+            for i in $(seq 1 60); do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' student-mysql)
+              [ "$STATUS" = "healthy" ] && break
+              sleep 2
+            done
+
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' student-mysql)
+            if [ "$STATUS" != "healthy" ]; then
+              docker logs student-mysql
+              exit 1
+            fi
+
+            echo "$GHCR_TOKEN" | docker login ghcr.io \
+              -u "$GHCR_USERNAME" --password-stdin
+
+            docker pull "$IMAGE_NAME"
+
+            docker rm -f student-app 2>/dev/null || true
+
+            docker run -d \
+              --name student-app \
+              --restart unless-stopped \
+              --network student-net \
+              -p 8080:8080 \
+              -e SPRING_DATASOURCE_URL=jdbc:mysql://student-mysql:3306/studentdb \
+              -e SPRING_DATASOURCE_USERNAME=studentuser \
+              -e SPRING_DATASOURCE_PASSWORD="$DB_PASSWORD" \
+              "$IMAGE_NAME"
+
+            docker image prune -f
