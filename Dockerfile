@@ -1,25 +1,24 @@
-# ---------- Stage 1: Build ----------
-FROM maven:3.9-eclipse-temurin-17 AS build
+# --- Stage 1: Build the application ---
+FROM maven:3.9.6-eclipse-temurin-17 AS builder
 WORKDIR /app
 
-# Pehle sirf pom.xml copy karo taaki dependencies cache ho jayein
+# Pehle dependencies download karein taaki caching fast ho
 COPY pom.xml .
-RUN mvn -B dependency:go-offline
+RUN mvn dependency:go-offline
 
-# Phir source code copy karke jar banao (tests CI me pehle hi chal chuke hain)
+# Source code copy karke jar file build karein (tests skip karke)
 COPY src ./src
-RUN mvn -B clean package -DskipTests
+RUN mvn clean package -DskipTests
 
-# ---------- Stage 2: Run ----------
-FROM eclipse-temurin:17-jre
+# --- Stage 2: Run the application using a lightweight JRE image ---
+FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
-# Non-root user (security ke liye)
-RUN useradd -r -u 1001 appuser
-USER appuser
+# Builder stage se sirf compiled jar file ko copy karein
+COPY --from=builder /app/target/*.jar app.jar
 
-COPY --from=build /app/target/*.jar app.jar
-
+# Spring Boot default port
 EXPOSE 8080
 
+# Application run karne ki command
 ENTRYPOINT ["java", "-jar", "app.jar"]

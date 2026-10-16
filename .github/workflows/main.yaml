@@ -1,124 +1,47 @@
-name: CI-CD Spring Boot Docker
+name: Automated CI/CD Pipeline to EC2
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-env:
-  IMAGE_NAME: student-management
 
 jobs:
-  # ---------- 1. BUILD + TEST ----------
-  build-test:
-    runs-on: ubuntu-latest
-
-    # Test ke liye temporary MySQL (contextLoads test ko DB chahiye)
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: studentdb
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h localhost -proot"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-
-    steps:
-      - name: Code checkout
-        uses: actions/checkout@v4
-
-      - name: Java 17 setup
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-          cache: maven
-
-      - name: Build and test
-        run: mvn -B clean verify
-        env:
-          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/studentdb
-          SPRING_DATASOURCE_USERNAME: root
-          SPRING_DATASOURCE_PASSWORD: root
-
-      - name: Upload test reports (fail hone par)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: surefire-reports
-          path: target/surefire-reports/
-
-  # ---------- 2. DOCKER IMAGE BUILD + PUSH ----------
-  docker:
-    needs: build-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Docker Hub login
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-  # ---------- 3. DEPLOY TO EC2 ----------
   deploy:
-    needs: docker
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy on EC2 via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-            docker network create student-net 2>/dev/null || true
+    - name: Copy files to EC2 via SSH
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        source: "."
+        target: "/home/${{ secrets.EC2_USER }}/student-app"
 
-            # MySQL container (sirf pehli baar banega, data volume mein safe rahega)
-            if [ -z "$(docker ps -aq -f name=^mysql-db$)" ]; then
-              docker run -d --name mysql-db --network student-net \
-                --restart unless-stopped \
-                -e MYSQL_ROOT_PASSWORD='${{ secrets.DB_PASSWORD }}' \
-                -e MYSQL_DATABASE=studentdb \
-                -v mysql-data:/var/lib/mysql \
-                mysql:8.0
-              echo "MySQL start ho raha hai, 30 sec wait..."
-              sleep 30
-            fi
+    - name: Auto Install Docker & Deploy via Docker Compose on EC2
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          # 1. Check and install Docker if not present
+          if ! command -v docker &> /dev/null
+          then
+              echo "Docker not found. Installing Docker..."
+              sudo apt update -y
+              sudo apt install docker.io docker-compose-v2 -y
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker $USER
+          else
+              echo "Docker is already installed."
+          fi
 
-            # App container update
-            docker pull $IMAGE
-            docker stop student-app 2>/dev/null || true
-            docker rm student-app 2>/dev/null || true
-
-            docker run -d --name student-app --network student-net \
-              --restart unless-stopped \
-              -p 8080:8080 \
-              -e SPRING_DATASOURCE_URL=jdbc:mysql://mysql-db:3306/studentdb \
-              -e SPRING_DATASOURCE_USERNAME=root \
-              -e SPRING_DATASOURCE_PASSWORD='${{ secrets.DB_PASSWORD }}' \
-              $IMAGE
-
-            docker image prune -f
+          # 2. Navigate to project directory and deploy
+          cd /home/${{ secrets.EC2_USER }}/student-app
+          sudo docker compose down -v
+          sudo docker compose up --build -d
