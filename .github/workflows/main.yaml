@@ -23,15 +23,18 @@ jobs:
         USER: ${{ secrets.EC2_USER }}
       run: |
         ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
-          # Docker aur Docker Compose Setup (Agar pehle se nahi hain toh install honge)
+          # 1. Docker aur system update
           sudo apt-get update -y
-          sudo apt-get install docker.io -y
+          sudo apt-get install docker.io git -y
           sudo systemctl start docker
           sudo systemctl enable docker
           sudo usermod -aG docker $USER
-          sudo apt-get install docker-compose-plugin -y
 
-          # Navigate to project directory or clone it
+          # 2. Docker Compose (Standalone) proper install karne ka tarika
+          sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+
+          # 3. Project folder clone ya pull karein
           if [ -d "/home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL" ]; then
             cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
             git pull origin main
@@ -41,7 +44,7 @@ jobs:
             cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
           fi
 
-          # Rebuild and restart containers using docker compose
-          docker compose down || true
-          docker compose up --build -d
+          # 4. Containers down aur up karein (docker-compose use karte hue)
+          sudo docker-compose down || true
+          sudo docker-compose up --build -d
         EOF
