@@ -45,6 +45,6 @@ jobs:
           fi
 
           # 4. Containers down aur up karein (docker-compose use karte hue)
-          sudo docker-compose down || true
+          sudo docker compose down -v
           sudo docker-compose up --build -d
         EOF
