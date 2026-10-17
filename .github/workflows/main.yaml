@@ -22,8 +22,9 @@ jobs:
         HOST: ${{ secrets.EC2_HOST }}
         USER: ${{ secrets.EC2_USER }}
       run: |
-        ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
-          # 1. Check karein ki project folder pehle se hai ya nahi
+        # '-tt' flag add kiya hai taaki terminal cleanly allocate ho
+        ssh -tt -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
+          # Project folder par jayein ya clone karein
           if [ -d "Student-Management-System-CRUD-Spring-Boot-MySQL" ]; then
             cd Student-Management-System-CRUD-Spring-Boot-MySQL
             git pull origin main
@@ -32,7 +33,9 @@ jobs:
             cd Student-Management-System-CRUD-Spring-Boot-MySQL
           fi
 
-          # 2. Docker compose down aur up clean tareeqe se chalayein
+          # Docker compose run karein
           docker compose down --remove-orphans || true
           docker compose up --build -d
+          
+          exit
         EOF
