@@ -1,24 +1,27 @@
-# --- Stage 1: Build the application ---
+# ==========================================
+# STAGE 1: Build the application using Maven
+# ==========================================
 FROM maven:3.9.6-eclipse-temurin-17 AS builder
 WORKDIR /app
 
-# Pehle dependencies download karein taaki caching fast ho
+# Copy pom.xml and source code
 COPY pom.xml .
-RUN mvn dependency:go-offline
-
-# Source code copy karke jar file build karein (tests skip karke)
 COPY src ./src
+
+# Build the jar file (skipping tests for faster build)
 RUN mvn clean package -DskipTests
 
-# --- Stage 2: Run the application using a lightweight JRE image ---
-FROM eclipse-temurin:17-jre-alpine
+# ==========================================
+# STAGE 2: Create lightweight production image
+# ==========================================
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 
-# Builder stage se sirf compiled jar file ko copy karein
+# Copy only the built jar file from the builder stage
 COPY --from=builder /app/target/*.jar app.jar
 
-# Spring Boot default port
+# Expose port
 EXPOSE 8080
 
-# Application run karne ki command
+# Run the jar file
 ENTRYPOINT ["java", "-jar", "app.jar"]

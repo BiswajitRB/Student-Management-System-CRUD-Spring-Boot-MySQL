@@ -1,39 +1,35 @@
 version: '3.8'
 
 services:
-  mysql:
-    image: mysql:latest
-    container_name: student-mysql
+  mysql-db:
+    image: mysql:8.0
+    container_name: student_mysql_container
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: studentdb
+      MYSQL_ROOT_PASSWORD: rootpassword
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
       - app-net
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpassword"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+    restart: always
 
-  app:
+  spring-app:
     build: .
-    container_name: student-app
+    container_name: student_App
     ports:
       - "8080:8080"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/studentdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql-db:3306/studentdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       - SPRING_DATASOURCE_USERNAME=root
       - SPRING_DATASOURCE_PASSWORD=rootpassword
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
     depends_on:
-      mysql:
-        condition: service_healthy
+      - mysql-db
     networks:
       - app-net
+    restart: always
 
 volumes:
   mysql_data:

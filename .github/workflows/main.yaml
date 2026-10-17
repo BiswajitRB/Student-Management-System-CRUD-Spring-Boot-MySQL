@@ -1,4 +1,4 @@
-name: Automated CI/CD Pipeline to EC2
+name: CI/CD Pipeline to AWS EC2
 
 on:
   push:
@@ -12,22 +12,33 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Copy essential files to EC2 via SSH
-      uses: appleboy/scp-action@master
+    - name: Set up SSH Key
+      uses: webfactory/ssh-agent@v0.9.0
       with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        source: "Dockerfile,docker-compose.yaml,src/,pom.xml"
-        target: "/home/${{ secrets.EC2_USER }}/student-app"
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-    - name: Deploy via Docker Compose on EC2
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          cd /home/${{ secrets.EC2_USER }}/student-app
-          sudo docker compose down -v
-          sudo docker compose up --build -d
+    - name: Deploy to EC2 via SSH
+      env:
+        HOST: ${{ secrets.EC2_HOST }}
+        USER: ${{ secrets.EC2_USER }}
+      run: |
+        ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
+          # Navigate to project directory or clone it
+          sudo apt-get update -y
+          sudo apt-get install docker.io -y
+          sudo systemctl start docker
+          sudo systemctl enable docker
+          sudo usermod -aG docker $USER
+          sudo apt-get install docker-compose-plugin -y
+          cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL || \
+          git clone https://github.com/BiswajitRB/Student-Management-System-CRUD-Spring-Boot-MySQL.git \
+          /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL && \
+          cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
+
+          # Pull latest changes
+          git pull origin main
+
+          # Rebuild and restart containers using multi-stage Docker build
+          docker compose down
+          docker compose up --build -d
+        EOF
