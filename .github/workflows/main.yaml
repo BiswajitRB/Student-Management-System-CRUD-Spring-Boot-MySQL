@@ -23,28 +23,16 @@ jobs:
         USER: ${{ secrets.EC2_USER }}
       run: |
         ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
-          # 1. Docker aur system update
-          sudo apt-get update -y
-          sudo apt-get install docker.io git -y
-          sudo systemctl start docker
-          sudo systemctl enable docker
-          sudo usermod -aG docker $USER
-
-          # 2. Docker Compose (Standalone) proper install karne ka tarika
-          sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-
-          # 3. Project folder clone ya pull karein
-          if [ -d "/home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL" ]; then
-            cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
+          # 1. Check karein ki project folder pehle se hai ya nahi
+          if [ -d "Student-Management-System-CRUD-Spring-Boot-MySQL" ]; then
+            cd Student-Management-System-CRUD-Spring-Boot-MySQL
             git pull origin main
           else
-            git clone https://github.com/BiswajitRB/Student-Management-System-CRUD-Spring-Boot-MySQL.git \
-            /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
-            cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
+            git clone https://github.com/BiswajitRB/Student-Management-System-CRUD-Spring-Boot-MySQL.git
+            cd Student-Management-System-CRUD-Spring-Boot-MySQL
           fi
 
-          # 4. Containers down aur up karein (docker-compose use karte hue)
-          sudo docker compose down -v
-          sudo docker-compose up --build -d
+          # 2. Docker compose down aur up clean tareeqe se chalayein
+          docker compose down --remove-orphans || true
+          docker compose up --build -d
         EOF
