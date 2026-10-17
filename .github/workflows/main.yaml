@@ -7,7 +7,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
+    
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -23,22 +23,25 @@ jobs:
         USER: ${{ secrets.EC2_USER }}
       run: |
         ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
-          # Navigate to project directory or clone it
+          # Docker aur Docker Compose Setup (Agar pehle se nahi hain toh install honge)
           sudo apt-get update -y
           sudo apt-get install docker.io -y
           sudo systemctl start docker
           sudo systemctl enable docker
           sudo usermod -aG docker $USER
           sudo apt-get install docker-compose-plugin -y
-          cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL || \
-          git clone https://github.com/BiswajitRB/Student-Management-System-CRUD-Spring-Boot-MySQL.git \
-          /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL && \
-          cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
 
-          # Pull latest changes
-          git pull origin main
+          # Navigate to project directory or clone it
+          if [ -d "/home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL" ]; then
+            cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
+            git pull origin main
+          else
+            git clone https://github.com/BiswajitRB/Student-Management-System-CRUD-Spring-Boot-MySQL.git \
+            /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
+            cd /home/$USER/Student-Management-System-CRUD-Spring-Boot-MySQL
+          fi
 
-          # Rebuild and restart containers using multi-stage Docker build
-          docker compose down
+          # Rebuild and restart containers using docker compose
+          docker compose down || true
           docker compose up --build -d
         EOF
