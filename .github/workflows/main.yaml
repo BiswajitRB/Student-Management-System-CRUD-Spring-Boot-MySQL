@@ -17,13 +17,13 @@ jobs:
       with:
         ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-    - name: Deploy and Debug on EC2 via SSH
+    - name: Deploy to EC2 via SSH
       env:
         HOST: ${{ secrets.EC2_HOST }}
         USER: ${{ secrets.EC2_USER }}
       run: |
         ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
-          # 1. Project folder me jayein ya clone karein
+          # Project folder me jayein ya clone karein
           if [ -d "Student-Management-System-CRUD-Spring-Boot-MySQL" ]; then
             cd Student-Management-System-CRUD-Spring-Boot-MySQL
             git pull origin main
@@ -31,18 +31,11 @@ jobs:
             git clone https://github.com/BiswajitRB/Student-Management-System-CRUD-Spring-Boot-MySQL.git
             cd Student-Management-System-CRUD-Spring-Boot-MySQL
           fi
-
-          # 2. Purane containers band karein aur naye build karke background me chalayein
+          
+          # 4 GB RAM par containers build aur run karein
           docker compose down --remove-orphans || true
           docker compose up --build -d
-
-          # 3. 5 second wait karein taaki containers fully start ho jayein
-          sleep 5
-
-          # 4. Containers ka status aur live logs GitHub Actions par print karein
-          echo "=== DOCKER CONTAINERS STATUS ==="
+          
+          echo "=== Deployment Successful & Containers Running ==="
           docker ps
-
-          echo "=== APPLICATION LOGS ==="
-          docker compose logs --tail=50
         EOF
